@@ -1,0 +1,85 @@
+---
+title: "508 TOD San Diego"
+author: "Ann Zhang"
+date: "2022-09-12"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(kableExtra)
+library(dplyr)
+
+options(scipen=999)
+options(tigris_class = "sf")
+
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+palette5 <- c("#8b195","#f67280","#c06c84","#6c5b5b","#355c7d")
+```
+
+
+```{r load_key, warning = FALSE, eval = FALSE}
+census_api_key("b3abcecc231fa30ccaa18cb5e854c30f1982fe3f", overwrite = TRUE, install = TRUE)
+readRenviron("~/.Renviron")
+```
+
+```{r results='hide'}
+tracts16 <-  
+  get_acs(geography = "tract",
+          variables = c("B25026_001E","B02001_002E",
+                        "B15001_050E","B15001_009E",
+                        "B19013_001E", "B25058_001E",
+                        "B06012_002E"), 
+          year=2016, state=42,
+          county=101, geometry=TRUE) %>% 
+  st_transform('ESRI:102728')
+```
+
+
+```{r}
+glimpse(tracts16)
+```
+
+
+#San Diego Tram Data
+
+```{r}
+sandiego <- st_read("https://seshat.datasd.org/sde/transit_routes_gtfs/transit_routes_datasd.geojson") %>%
+  dplyr::select("objectid", "route_type", "long_name", "short_name") %>%
+  rename(Lines = long_name)
+
+SD <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
+  filter(stop_agncy == "MTS")
+
+SD_Tram <- 
+  sandiego %>%
+  filter(route_type == "0"| route_type == "2") 
+```
+
+
+
+```{r}
+philly <- st_read("https://opendata.arcgis.com/datasets/8c6e2575c8ad46eb887e6bb35825e1a6_0.geojson")
+```
+
+```{r}
+SD_Stops <- st_read("https://gissd.sandag.org/rdw/rest/services/Transportation/GTFS_Transit/MapServer/2/query?where=1%3D1&outFields=*&outSR=4326&f=json") %>%
+  filter(route_id == 510| route_id == 520| route_id == 530) %>%
+  rename(stop_uid = stop_UID)
+
+SD_All <- left_join(SD_Stops, SD, by= c("stop_uid"))
+
+SD_Clean <- SD_All[!duplicated(SD_All$stop_name),]
+```
+
+write.table(SD_Clean, file="SD-Clean.csv", sep=",")
+
+
+
+
+
+
+
