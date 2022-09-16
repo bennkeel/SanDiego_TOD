@@ -272,15 +272,23 @@ allTracts <- rbind(tracts16,tracts20)
 
 ```{r}
 SD_Stops <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
- filter(stop_agncy == "MTS")
+  filter(stop_agncy == "MTS")%>%
+  dplyr::select(stop_uid, stop_name, geometry)
 
 SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit.csv") %>%
   filter(route_id == 510| route_id == 520| route_id == 530) %>%
-  rename(stop_uid = stop_UID)
+  rename(stop_uid = stop_UID)%>%
+  mutate(line = case_when(route_id == 510 ~ "Blue",
+                          route_id == 520 ~ "Orange",
+                          route_id == 530 ~ "Green",
+                          TRUE ~ "other"))
 
-SD_trolleyDubs <- left_join(SD_RoutesTable, SD_Stops, by= c("stop_uid"))
+SD_trolleyDubs <- left_join(SD_RoutesTable, SD_Stops, by= c("stop_uid"))%>%
+  dplyr::select(line, stop_name, geometry)
 
 SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]
+
+glimpse(SD_trolley)
 
 # trolleyStops <-
 #   rbind(
