@@ -271,32 +271,39 @@ allTracts <- rbind(tracts16,tracts20)
 ### Wrangling Transit Open Data
 
 ```{r}
-trolleyStops <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson")
-glimpse(trolleyStops)
+SD_Stops <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
+ filter(stop_agncy == "MTS")
 
-trolleyStops <- 
-  rbind(
-    st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>% 
-      mutate(Line = "El") %>%
-      dplyr::select(Station, Line),
-    st_read("https://opendata.arcgis.com/datasets/2e9037fd5bef406488ffe5bb67d21312_0.geojson") %>%
-      mutate(Line ="Broad_St") %>%
-      dplyr::select(Station, Line)) %>%
-  st_transform(st_crs(tracts16))  
+SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit.csv") %>%
+  filter(route_id == 510| route_id == 520| route_id == 530) %>%
+  rename(stop_uid = stop_UID)
+
+SD_trolleyDubs <- left_join(SD_RoutesTable, SD_Stops, by= c("stop_uid"))
+
+SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]
+
+# trolleyStops <-
+#   rbind(
+#     st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
+#       mutate(Line = "El") %>%
+#       dplyr::select(Station, Line),
+#     st_read("https://opendata.arcgis.com/datasets/2e9037fd5bef406488ffe5bb67d21312_0.geojson") %>%
+#       mutate(Line ="Broad_St") %>%
+#       dplyr::select(Station, Line)) %>%
+#   st_transform(st_crs(tracts16))
 ```
 
 Let's visualize it
 
 ```{r}
-
 ggplot() + 
   geom_sf(data=st_union(tracts16)) +
-  geom_sf(data=septaStops, 
-          aes(colour = Line), 
+  geom_sf(data=SD_trolley, 
+          aes(color = route_id), 
           show.legend = "point", size= 2) +
   scale_colour_manual(values = c("orange","blue")) +
-  labs(title="Septa Stops", 
-       subtitle="Philadelphia, PA", 
+  labs(title="Trolley Stops", 
+       subtitle="San Diego, CA", 
        caption="Figure 2.5") +
   mapTheme()
 ```
