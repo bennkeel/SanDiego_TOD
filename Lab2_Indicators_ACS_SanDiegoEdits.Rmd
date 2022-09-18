@@ -79,6 +79,8 @@ census_api_key("3c9540be1434ac4b38e6e55d60e8ee95909f2254", overwrite = TRUE)
 Notice this returns "long" data - let's examine it
 
 ```{r results='hide'}
+SD_crs = 'ESRI:102411'
+
 tracts16 <-  
   get_acs(geography = "tract",
           variables = c("B25026_001E","B02001_002E",
@@ -87,7 +89,7 @@ tracts16 <-
                         "B06012_002E"), 
           year=2016, state=06,
           county=073, geometry=TRUE) %>% 
-  st_transform('ESRI:102411')
+  st_transform(SD_crs)
 ```
 
 #### Wide data vs long data (and `spread`vs `gather`)
@@ -241,7 +243,7 @@ tracts20 <-
                         "B06012_002E"), 
           year=2016, state=06,
           county=073, geometry=TRUE, output = 'wide') %>% 
-  st_transform('ESRI:102411') %>%
+  st_transform(SD_crs) %>%
   rename(TotalPop = B25026_001E, 
          Whites = B02001_002E,
          FemaleBachelors = B15001_050E, 
@@ -273,7 +275,7 @@ allTracts <- rbind(tracts16,tracts20)
 ```{r}
 SD_Stops <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
   filter(stop_agncy == "MTS")%>%
-  dplyr::select(stop_uid, stop_name, geometry)
+  dplyr::select(stop_uid, stop_name, geometry, lat, lng)
 
 SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit.csv") %>%
   filter(route_id == 510| route_id == 520| route_id == 530) %>%
@@ -284,30 +286,28 @@ SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit
                           TRUE ~ "other"))
 
 SD_trolleyDubs <- left_join(SD_RoutesTable, SD_Stops, by= c("stop_uid"))%>%
-  dplyr::select(line, stop_name, geometry)
+  dplyr::select(-stop_uid)
 
-SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]
+SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]%>%
+  st_as_sf(coords = c("lng", "lat"),
+           crs = "EPSG:4326")%>%
+  st_transform(SD_crs)
+
 
 glimpse(SD_trolley)
-
-# trolleyStops <-
-#   rbind(
-#     st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
-#       mutate(Line = "El") %>%
-#       dplyr::select(Station, Line),
-#     st_read("https://opendata.arcgis.com/datasets/2e9037fd5bef406488ffe5bb67d21312_0.geojson") %>%
-#       mutate(Line ="Broad_St") %>%
-#       dplyr::select(Station, Line)) %>%
-#   st_transform(st_crs(tracts16))
+st_crs(SD_trolley)
 ```
 
 Let's visualize it
 
 ```{r}
+glimpse(SD_trolley)
+plot(SD_trolley)
+
 ggplot() + 
   geom_sf(data=st_union(tracts16)) +
   geom_sf(data=SD_trolley, 
-          aes(color = route_id), 
+          aes(colour = line), 
           show.legend = "point", size= 2) +
   scale_colour_manual(values = c("orange","blue")) +
   labs(title="Trolley Stops", 
