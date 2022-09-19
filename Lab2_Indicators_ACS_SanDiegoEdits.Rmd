@@ -349,7 +349,6 @@ trolleyMaxBuffer <-
     st_union(st_buffer(SD_trolley, 14484)) %>%
     st_sf()%>%
     mutate(Legend = "Max Buffer")
-
 #Intersect the tracts with the max buffer //Not Doing This One
 # selectionMax <- allTracts[st_intersects(allTracts, trolleyMaxBuffer) %>% lengths > 0, ] %>%
 #   dplyr::select(TotalPop) %>%
@@ -372,7 +371,6 @@ tracts20_LimitSD <-
 
 allTracts_LimitSD <- rbind(tracts16_LimitSD, tracts20_LimitSD)
 
-intersections <- rbind(selectionMax, tracts16_SD)
 
 #Plot the intersection to see the shape
 ggplot() +
@@ -452,8 +450,6 @@ ggplot() +
   facet_wrap(~Legend) + 
   labs(caption = "Figure 2.6") +
   mapTheme()
-
-
 ```
 
 
@@ -782,68 +778,37 @@ glimpse(SD_trolley)
 
 ```{r}
 #allTracts <- rbind(tracts20_LimitSD,tracts16_LimitSD)
-trolleyBuffersInd <- filter(trolleyBuffers, Legend == "Buffer")
+trolleyPB <- filter(trolleyBuffers, Legend == "Buffer")%>%
+  tibble::rowid_to_column("ID")
 allTracts_LimitSD_C <- dplyr::select(allTracts_LimitSD, GEOID, TotalPop, MedRent, year, geometry)
-  
+glimpse(trolleyPB)  
   
 stationData <- 
-  st_join(trolleyBuffersInd, allTracts_LimitSD_C, join = st_intersects) %>% #get spacial join/filter of Trolley Buffers and all_tracts_limitSD
-  
-  aggregate(stationData$totalPop, list(stationData$geometry), mean) 
-    [trolleyBuffersInd,]%>% #get buffers and filter out unifier
-  mutate()#give each buffer its associated tracts
-  
-  dplyr::select(tracts)
-  mutate#average the population data (mutate?) 
-  #average the rent data across the included tracts (mutate?)
-  #join allTracts_LimitSD to station data based on intersecting each buffer's spatial-selected tracts
-  st_drop_geometry() %>% #drop buffer geometry
-  left_join(dplyr::select(SD_trolley, -route_id, -stop_agency)) %>% #add point geometry from SD_trolley
-  #make into sf object again
-  
-plot(stationData)
-selection2 <- tracts16_LimitSD[st_intersects(tracts16_LimitSD, buffer) %>% lengths > 0, ] %>%
-  dplyr::select(TotalPop) %>%
-  mutate(Selection_Type = "Spatial Selection")
-    
-    glimpse(SD_trolley)
-  glimpse(allTracts_LimitSD)
-selection2 <- tracts16_LimitSD[st_intersects(tracts16_LimitSD, buffer) %>% lengths > 0, ]
+  st_join(trolleyPB, allTracts_LimitSD_C, join = st_intersects)%>%  #get spacial join/filter of Trolley Buffers and all_tracts_limitSD
+  dplyr::select(ID, Legend, GEOID, TotalPop, MedRent, geometry)%>%
+  dplyr::group_by(ID)%>%
+  summarize(pop = mean(TotalPop), rent=mean(MedRent, na.rm = TRUE))%>%
+  st_centroid(stationData)%>%
+  st_as_sf()
 
-  mutate()
- %>%
-  dplyr::select(TotalPop, MedRent)%>%
-  st_drop_geometry()%>%
-  left_join()
+ggplot() +
+  geom_sf(data = allTracts_LimitSD, fill = "grey40") +
+  geom_sf(data = stationData,
+          pch = 21,
+          aes(size = (pop)),
+          fill = alpha("red", 0.7),
+          col = "grey20") +
+  labs(size = "No. airports") +
+  scale_size(range = c(1, 5))
 
-plot(stationData)
-glimpse(stationData)
-nrow(trolleyBuffers)
-
-  # ggplot() +
-  #   geom_sf(data=stationData) +
-  #   geom_sf(data=SD_trolley, size=1)
-  #   labs(title="Half mile buffers") +
-  #   mapTheme()
-
-
-head(trolleyBuffers)
-  
-buffer <- 
-  left_join(SD_Stops, )
-
-st_centroid(allTracts_LimitSD)[buffer,] %>%
-  st_drop_geometry() %>%
-  left_join(allTracts_LimitSD) %>%
-  st_sf() %>%
-  mutate(TOD = "TOD")
-
+aes(fill = q5(estimate))
 
 tmap_mode("view")%>%
   tm_shape(SD_trolley)+
   tm_bubbles(col = "red",
-            size = tStopData$totalPop,
+            size = 1,
              border.col = "black",
            border.lwd = 1)
+
 
 ```
