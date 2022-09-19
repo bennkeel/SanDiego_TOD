@@ -229,7 +229,6 @@ tracts16 <-
          MedRent = B25058_001,
          TotalPoverty = B06012_002)
 
-
 # Let's create new rate variables using mutate
 
 tracts16 <- 
@@ -239,6 +238,8 @@ tracts16 <-
          pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
          year = "2016") %>%
   dplyr::select(-Whites,-FemaleBachelors,-MaleBachelors,-TotalPoverty)
+
+head(tracts16)
 ```
 
 Tracts 2016 is now complete. Let's grab 2020 tracts and do the same
@@ -260,7 +261,7 @@ tracts20 <-
                         "B15001_050E","B15001_009E",
                         "B19013_001E","B25058_001E",
                         "B06012_002E"), 
-          year=2016, state=06,
+          year=2020, state=06,
           county=073, geometry=TRUE, output = 'wide') %>% 
   st_transform(SD_crs) %>%
   rename(TotalPop = B25026_001E, 
@@ -313,8 +314,10 @@ SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]%>%
   st_transform(SD_crs)
 
 
-#glimpse(SD_trolley)
+glimpse(SD_trolley)
 #st_crs(SD_trolley)
+
+
 ```
 
 Let's visualize it
@@ -334,7 +337,7 @@ ggplot() +
        caption="Figure 2.5") +
   mapTheme()
 ```
-### Finding the best boundary
+### Finding the Best Boundary For Analysis
 
 Evidently San Diego is a large county with many regions, and the trolley system is just in a single urban corner. By evaluating a large buffer and seeing which parts intersect, we can reduce the influence of unknown variables from the analysis, like access to North County and Los Angeles to the North.
 
@@ -347,36 +350,43 @@ trolleyMaxBuffer <-
     st_sf()%>%
     mutate(Legend = "Max Buffer")
 
-#plot the max buffer to check
-ggplot() +
-  geom_sf(data=trolleyMaxBuffer) +
-  geom_sf(data=SD_trolley, show.legend = "point") +
-  facet_wrap(~Legend) + 
-  labs(caption = "Figure 2.6") +
-  mapTheme()
+#Intersect the tracts with the max buffer //Not Doing This One
+# selectionMax <- allTracts[st_intersects(allTracts, trolleyMaxBuffer) %>% lengths > 0, ] %>%
+#   dplyr::select(TotalPop) %>%
+#   mutate(Selection_Type = "Spatial Selection")
 
-#Intersect the tracts with the max buffer
-selectionMax <- tracts16[st_intersects(tracts16, trolleyMaxBuffer) %>% lengths > 0, ] %>%
-  dplyr::select(TotalPop) %>%
-  mutate(Selection_Type = "Spatial Selection")
 
-selectMaxCentroids <-
+
+#Intersect the tracts with the max buffer based on the tract's centroids. Must be separate or else left_join will duplicate.
+tracts16_LimitSD <-
   st_centroid(tracts16)[trolleyMaxBuffer,] %>%
   st_drop_geometry() %>%
-  left_join(., dplyr::select(allTracts, GEOID), by = "GEOID") %>%
+  left_join(., dplyr::select(tracts16, GEOID), by = "GEOID") %>%
   st_sf()
 
+tracts20_LimitSD <-
+  st_centroid(tracts20)[trolleyMaxBuffer,] %>%
+  st_drop_geometry() %>%
+  left_join(., dplyr::select(tracts20, GEOID), by = "GEOID") %>%
+  st_sf()
 
-intersections <- rbind(selectionMax, selectMaxCentroids)
+allTracts_LimitSD <- rbind(tracts16_LimitSD, tracts20_LimitSD)
+
+intersections <- rbind(selectionMax, tracts16_SD)
 
 #Plot the intersection to see the shape
 ggplot() +
-  geom_sf(data=selectMaxCentroids, aes(fill = q5(TotalPop))) +
+  geom_sf(data=allTracts_LimitSD, aes(fill = q5(TotalPop))) +
   geom_sf(data=SD_trolley, show.legend = "point") +
+  facet_wrap(~year) + 
   scale_fill_manual(values = palette5,
     labels = qBr(totalPop16, "estimate"),
     name = "Popluation\n(Quintile Breaks)") +
   mapTheme()
+
+glimpse(selectMaxCentroids)
+
+
 
 ```
 
@@ -398,10 +408,11 @@ ggplot() +
 tractsBoundary <- st_union(selectMaxCentroids)
 
 #Writing a geojson to include in the map diagram:
-tractsBoundary_sf <- st_as_sf(tractsBoundary, coords = c("x", "y"), crs = SD_crs, agr = "constant") %>%
-  st_transform("EPSG:4326")
+# tractsBoundary_sf <- st_as_sf(tractsBoundary, coords = c("x", "y"), crs = SD_crs, agr = "constant") %>%
+#   st_transform("EPSG:4326")
+# 
+# st_write(tractsBoundary_sf, "SDAnalysisBoundary3.geojson")
 
-st_write(tractsBoundary_sf, "SDAnalysisBoundary3.geojson")
 
 
 ```
@@ -616,19 +627,35 @@ then examine it. What represents the joins/doesn't join dichotomy? Note
 that this contains a correct 2016-2020 inflation calculation
 
 ```{r}
-allTracts.group <- 
+# allTracts.group <- 
+#   rbind(
+#     st_centroid(allTracts)[buffer,] %>%
+#       st_drop_geometry() %>%
+#       left_join(allTracts) %>%
+#       st_sf() %>%
+#       mutate(TOD = "TOD"),
+#     st_centroid(allTracts)[buffer, op = st_disjoint] %>%
+#       st_drop_geometry() %>%
+#       left_join(allTracts) %>%
+#       st_sf() %>%
+#       mutate(TOD = "Non-TOD")) %>%
+#   mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.14, MedRent)) 
+
+tracts_LimitSD.group <- 
   rbind(
-    st_centroid(allTracts)[buffer,] %>%
+    st_centroid(tracts_Limited)[buffer,] %>%
       st_drop_geometry() %>%
-      left_join(allTracts) %>%
+      left_join(tracts_Limited) %>%
       st_sf() %>%
       mutate(TOD = "TOD"),
-    st_centroid(allTracts)[buffer, op = st_disjoint] %>%
+    st_centroid(tracts_Limited)[buffer, op = st_disjoint] %>%
       st_drop_geometry() %>%
-      left_join(allTracts) %>%
+      left_join(tracts_Limited) %>%
       st_sf() %>%
       mutate(TOD = "Non-TOD")) %>%
   mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.14, MedRent)) 
+
+glimpse(tracts_Limited)
 
 ```
 
@@ -638,8 +665,8 @@ contained in "map_exercise.R"
 ### TOD Indicator Tables
 
 ```{r}
-allTracts.Summary <- 
-  st_drop_geometry(allTracts.group) %>%
+tracts_LimitSD.Summary <- 
+  st_drop_geometry(tracts_LimitSD.group) %>%
   group_by(year, TOD) %>%
   summarize(Rent = mean(MedRent, na.rm = T),
             Population = mean(TotalPop, na.rm = T),
@@ -647,7 +674,7 @@ allTracts.Summary <-
             Percent_Bach = mean(pctBachelors, na.rm = T),
             Percent_Poverty = mean(pctPoverty, na.rm = T))
 
-kable(allTracts.Summary) %>%
+kable(tracts_LimitSD.Summary) %>%
   kable_styling() %>%
   footnote(general_title = "\n",
            general = "Table 2.2")
