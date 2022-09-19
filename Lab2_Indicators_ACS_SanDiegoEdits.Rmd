@@ -56,7 +56,6 @@ In this lab we will walk through:
 
 ```{r setup_packages, warning = FALSE, message = FALSE}
 # Load Libraries
-
 library(tidyverse)
 library(tidycensus)
 library(sf)
@@ -90,6 +89,26 @@ tracts16 <-
           year=2016, state=06,
           county=073, geometry=TRUE) %>% 
   st_transform(SD_crs)
+
+```
+
+```{r results='hide', eval = FALSE}
+
+#Writing GeoJson for visualization/diagram purposes
+
+tracts16_slim <-  
+  get_acs(geography = "tract",
+          variables = c("B25026_001E"), 
+          year=2016, state=06,
+          county=073, geometry=TRUE) %>% 
+  st_transform(SD_crs)
+  st_transform("EPSG:4326")
+
+tracts16_sf = st_as_sf(tracts16_slim, coords = c("x", "y"), crs = "EPSG:4326", agr = "constant")
+
+st_write(tracts16_sf, "SDtracts2.geojson")
+
+
 ```
 
 #### Wide data vs long data (and `spread`vs `gather`)
@@ -182,7 +201,7 @@ D <-
   labs(title = "Total Population", subtitle = "Philadelphia; 2016") +
   mapTheme() + 
   theme(plot.title = element_text(size=22))
-D
+C
 
 ```
 
@@ -294,27 +313,99 @@ SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]%>%
   st_transform(SD_crs)
 
 
-glimpse(SD_trolley)
-st_crs(SD_trolley)
+#glimpse(SD_trolley)
+#st_crs(SD_trolley)
 ```
 
 Let's visualize it
 
 ```{r}
-glimpse(SD_trolley)
-plot(SD_trolley)
+#glimpse(SD_trolley)
+#plot(SD_trolley)
 
 ggplot() + 
   geom_sf(data=st_union(tracts16)) +
   geom_sf(data=SD_trolley, 
           aes(colour = line), 
           show.legend = "point", size= 2) +
-  scale_colour_manual(values = c("orange","blue")) +
+  scale_colour_manual(values = c("blue","green", "orange"))+
   labs(title="Trolley Stops", 
        subtitle="San Diego, CA", 
        caption="Figure 2.5") +
   mapTheme()
 ```
+### Finding the best boundary
+
+Evidently San Diego is a large county with many regions, and the trolley system is just in a single urban corner. By evaluating a large buffer and seeing which parts intersect, we can reduce the influence of unknown variables from the analysis, like access to North County and Los Angeles to the North.
+
+<insert photo here>
+
+```{r}
+# 9 mile buffer around the trolley stops to limit evaluation
+trolleyMaxBuffer <- 
+    st_union(st_buffer(SD_trolley, 14484)) %>%
+    st_sf()%>%
+    mutate(Legend = "Max Buffer")
+
+#plot the max buffer to check
+ggplot() +
+  geom_sf(data=trolleyMaxBuffer) +
+  geom_sf(data=SD_trolley, show.legend = "point") +
+  facet_wrap(~Legend) + 
+  labs(caption = "Figure 2.6") +
+  mapTheme()
+
+#Intersect the tracts with the max buffer
+selectionMax <- tracts16[st_intersects(tracts16, trolleyMaxBuffer) %>% lengths > 0, ] %>%
+  dplyr::select(TotalPop) %>%
+  mutate(Selection_Type = "Spatial Selection")
+
+selectMaxCentroids <-
+  st_centroid(tracts16)[trolleyMaxBuffer,] %>%
+  st_drop_geometry() %>%
+  left_join(., dplyr::select(allTracts, GEOID), by = "GEOID") %>%
+  st_sf()
+
+
+intersections <- rbind(selectionMax, selectMaxCentroids)
+
+#Plot the intersection to see the shape
+ggplot() +
+  geom_sf(data=selectMaxCentroids, aes(fill = q5(TotalPop))) +
+  geom_sf(data=SD_trolley, show.legend = "point") +
+  scale_fill_manual(values = palette5,
+    labels = qBr(totalPop16, "estimate"),
+    name = "Popluation\n(Quintile Breaks)") +
+  mapTheme()
+
+```
+
+### Plotting the Limited Census Tract Area
+
+```{r}
+
+ggplot() + 
+  geom_sf(data=st_union(selectMaxCentroids)) +
+  geom_sf(data=SD_trolley, 
+          aes(colour = line), 
+          show.legend = "point", size= 2) +
+  scale_colour_manual(values = c("blue","green", "orange"))+
+  labs(title="Trolley Stops", 
+       subtitle="San Diego, CA", 
+       caption="Figure 2.5") +
+  mapTheme()
+
+tractsBoundary <- st_union(selectMaxCentroids)
+
+#Writing a geojson to include in the map diagram:
+tractsBoundary_sf <- st_as_sf(tractsBoundary, coords = c("x", "y"), crs = SD_crs, agr = "constant") %>%
+  st_transform("EPSG:4326")
+
+st_write(tractsBoundary_sf, "SDAnalysisBoundary3.geojson")
+
+
+```
+
 
 ### Relating SEPTA Stops and Tracts
 
@@ -328,12 +419,12 @@ We put them in the same data frame... why?
 
 ```{r}
 
-septaBuffers <- 
+trolleyBuffers <- 
   rbind(
-    st_buffer(septaStops, 2640) %>%
+    st_buffer(SD_trolley, 805) %>%
       mutate(Legend = "Buffer") %>%
       dplyr::select(Legend),
-    st_union(st_buffer(septaStops, 2640)) %>%
+    st_union(st_buffer(SD_trolley, 805)) %>%
       st_sf() %>%
       mutate(Legend = "Unioned Buffer"))
 ```
@@ -346,12 +437,14 @@ geographic area. We accomplish this by using the `facet_wrap()`
 
 ```{r}
 ggplot() +
-  geom_sf(data=septaBuffers) +
-  geom_sf(data=septaStops, show.legend = "point") +
+  geom_sf(data=trolleyBuffers) +
+  geom_sf(data=SD_trolley, show.legend = "point") +
   facet_wrap(~Legend) + 
   labs(caption = "Figure 2.6") +
   mapTheme()
 ```
+
+
 
 ### Using the `sf` Package for Spatial operations
 
@@ -362,7 +455,7 @@ Create an sf object with ONLY the unioned buffer from the `septaBuffers`
 spatial data frame.
 
 ```{r}
-buffer <- filter(septaBuffers, Legend=="Unioned Buffer")
+buffer <- filter(trolleyBuffers, Legend=="Unioned Buffer")
 ```
 
 ### Spatial Intersection of tracts and buffers
@@ -496,10 +589,18 @@ intersections <- rbind(clip, selection1, selectCentroids)
 
 ggplot() +
   geom_sf(data=intersections, aes(fill = TotalPop)) +
-  geom_sf(data=septaStops, show.legend = "point") +
+  geom_sf(data=SD_trolley, show.legend = "point") +
   scale_fill_viridis_c() +
   facet_wrap(~Selection_Type) + 
   mapTheme()
+
+
+# glimpse(SD_trolley)
+# mydata <- SD_trolley %>% 
+#   filter(stop_name == "Balboa Avenue Station")%>%
+#   st_transform("EPSG: 4326")
+# 
+# mydata
 ```
 
 ## Bonus Exercise - Can you create a small multiple map of the three types of operations? (NOT GRADED)
@@ -628,22 +729,22 @@ allTracts.threeMarkets <-
 
 ```{r}
 allTracts <- rbind(tracts20,tracts16)
-septa_MRB <- multipleRingBuffer(st_union(septaStops), 47520, 2640)
+trolley_MRB <- multipleRingBuffer(st_union(SD_trolley), 14484, 805)
 
 allTracts.rings <-
   st_join(st_centroid(dplyr::select(allTracts, GEOID, year)),
-          septa_MRB) %>%
+          trolley_MRB) %>%
   st_drop_geometry() %>%
   left_join(dplyr::select(allTracts, GEOID, MedRent, year), 
             by=c("GEOID"="GEOID", "year"="year")) %>%
   st_sf() %>%
-  mutate(distance = distance / 5280) #convert to miles
+  mutate(distance = distance / 805) #convert to miles
 
 
 
   ggplot() +
-    geom_sf(data=septa_MRB) +
-    geom_sf(data=septaStops, size=1) +
+    geom_sf(data=trolley_MRB) +
+    geom_sf(data=SD_trolley, size=1) +
     geom_sf(data=st_union(tracts20), fill=NA, size=1.2) +
     labs(title="Half mile buffers") +
     mapTheme()
