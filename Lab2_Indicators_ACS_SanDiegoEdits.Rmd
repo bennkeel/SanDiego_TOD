@@ -94,25 +94,6 @@ tracts16 <-
 
 ```
 
-```{r results='hide', eval = FALSE}
-
-#Writing GeoJson for visualization/diagram purposes
-
-tracts16_slim <-  
-  get_acs(geography = "tract",
-          variables = c("B25026_001E"), 
-          year=2016, state=06,
-          county=073, geometry=TRUE) %>% 
-  st_transform(SD_crs)
-  st_transform("EPSG:4326")
-
-tracts16_sf = st_as_sf(tracts16_slim, coords = c("x", "y"), crs = "EPSG:4326", agr = "constant")
-
-st_write(tracts16_sf, "SDtracts2.geojson")
-
-
-```
-
 #### Wide data vs long data (and `spread`vs `gather`)
 
 Take a moment to think about the *shape* of data. The gif below is a
@@ -262,7 +243,7 @@ tracts20 <-
                         "B15001_050E","B15001_009E",
                         "B19013_001E","B25058_001E",
                         "B06012_002E"), 
-          year=2020, state=06,
+          year=2019, state=06,
           county=073, geometry=TRUE, output = 'wide') %>% 
   st_transform(SD_crs) %>%
   rename(TotalPop = B25026_001E, 
@@ -276,7 +257,7 @@ tracts20 <-
   mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop,0),
          pctBachelors = ifelse(TotalPop > 0, ((FemaleBachelors + MaleBachelors) / TotalPop),0),
          pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
-         year = "2020") %>%
+         year = "2019") %>%
   dplyr::select(-Whites, -FemaleBachelors, -MaleBachelors, -TotalPoverty) 
 ```
 
@@ -349,12 +330,6 @@ trolleyMaxBuffer <-
     st_union(st_buffer(SD_trolley, 14484)) %>%
     st_sf()%>%
     mutate(Legend = "Max Buffer")
-#Intersect the tracts with the max buffer //Not Doing This One
-# selectionMax <- allTracts[st_intersects(allTracts, trolleyMaxBuffer) %>% lengths > 0, ] %>%
-#   dplyr::select(TotalPop) %>%
-#   mutate(Selection_Type = "Spatial Selection")
-
-
 
 #Intersect the tracts with the max buffer based on the tract's centroids. Must be separate or else left_join will duplicate.
 tracts16_LimitSD <-
@@ -381,8 +356,6 @@ ggplot() +
     labels = qBr(totalPop16, "estimate"),
     name = "Popluation\n(Quintile Breaks)") +
   mapTheme()
-
-glimpse(selectMaxCentroids)
 
 
 
@@ -755,6 +728,7 @@ allTracts.threeMarkets <-
 #allTracts <- rbind(tracts20_LimitSD,tracts16_LimitSD)
 trolley_MRB <- multipleRingBuffer(st_union(SD_trolley), 14484, 805)
 
+
 allTracts_LimitSD.rings <-
   st_join(st_centroid(dplyr::select(allTracts_LimitSD, GEOID, year)),
           trolley_MRB) %>%
@@ -762,7 +736,7 @@ allTracts_LimitSD.rings <-
   left_join(dplyr::select(allTracts_LimitSD, GEOID, MedRent, year), 
             by=c("GEOID"="GEOID", "year"="year")) %>%
   st_sf() %>%
-  mutate(distance = distance / 805) #convert to miles
+  mutate(distance = distance / 1610) #convert to miles
 
 glimpse(SD_trolley)
 
@@ -774,6 +748,32 @@ glimpse(SD_trolley)
     mapTheme()
 
 ```
+### Line Graph
+```{r}
+glimpse(allTracts.ring.summary)
+allTracts.ring.summary <- allTracts_LimitSD.rings %>%
+  dplyr::select(year, distance, MedRent)%>%
+  st_drop_geometry()%>%
+  group_by(year,distance)%>%
+  summarize(Rent=median(MedRent, na.rm=T))
+
+ggplot(data=allTracts.ring.summary, aes(x=distance, y=Rent, group = year),)+
+  geom_line(aes(color=year), size=1.5)+
+  geom_point(aes(color=year), size = 3)
+  
+
+
+
+st_join(st_centroid(dplyr::select(allTracts_LimitSD, GEOID, year)),
+          trolley_MRB) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(allTracts_LimitSD, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distance = distance / 805)
+```
+
+
 ### Plotting a graduated symbol map
 
 ```{r}
@@ -798,7 +798,7 @@ ggplot() +
           aes(size = (pop)),
           fill = alpha("red", 0.7),
           col = "grey20") +
-  labs(size = "No. airports") +
+  labs(size = "Population") +
   scale_size(range = c(1, 5))
 
 aes(fill = q5(estimate))
