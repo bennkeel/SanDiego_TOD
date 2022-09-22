@@ -56,11 +56,12 @@ In this lab we will walk through:
 
 ```{r setup_packages, warning = FALSE, message = FALSE}
 # Load Libraries
-
 library(tidyverse)
 library(tidycensus)
 library(sf)
 library(kableExtra)
+install.packages('tmap')
+library(tmap)
 
 options(scipen=999)
 options(tigris_class = "sf")
@@ -79,15 +80,18 @@ census_api_key("3c9540be1434ac4b38e6e55d60e8ee95909f2254", overwrite = TRUE)
 Notice this returns "long" data - let's examine it
 
 ```{r results='hide'}
+SD_crs = 'ESRI:102411'
+
 tracts16 <-  
   get_acs(geography = "tract",
           variables = c("B25026_001E","B02001_002E",
                         "B15001_050E","B15001_009E",
                         "B19013_001E", "B25058_001E",
                         "B06012_002E"), 
-          year=2016, state=06,
+          year=2009, state=06,
           county=073, geometry=TRUE) %>% 
-  st_transform('ESRI:102411')
+  st_transform(SD_crs)
+
 ```
 
 #### Wide data vs long data (and `spread`vs `gather`)
@@ -121,7 +125,6 @@ glimpse(tracts16)
 We create a new data frame consisting only of population
 
 ```{r}
-
 totalPop16 <-
   tracts16 %>%
   filter(variable == "B25026_001")
@@ -180,7 +183,7 @@ D <-
   labs(title = "Total Population", subtitle = "Philadelphia; 2016") +
   mapTheme() + 
   theme(plot.title = element_text(size=22))
-D
+C
 
 ```
 
@@ -208,7 +211,6 @@ tracts16 <-
          MedRent = B25058_001,
          TotalPoverty = B06012_002)
 
-
 # Let's create new rate variables using mutate
 
 tracts16 <- 
@@ -216,8 +218,10 @@ tracts16 <-
   mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop, 0),
          pctBachelors = ifelse(TotalPop > 0, ((FemaleBachelors + MaleBachelors) / TotalPop), 0),
          pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
-         year = "2016") %>%
+         year = "2009") %>%
   dplyr::select(-Whites,-FemaleBachelors,-MaleBachelors,-TotalPoverty)
+
+head(tracts16)
 ```
 
 Tracts 2016 is now complete. Let's grab 2020 tracts and do the same
@@ -239,9 +243,9 @@ tracts20 <-
                         "B15001_050E","B15001_009E",
                         "B19013_001E","B25058_001E",
                         "B06012_002E"), 
-          year=2016, state=06,
+          year=2019, state=06,
           county=073, geometry=TRUE, output = 'wide') %>% 
-  st_transform('ESRI:102411') %>%
+  st_transform(SD_crs) %>%
   rename(TotalPop = B25026_001E, 
          Whites = B02001_002E,
          FemaleBachelors = B15001_050E, 
@@ -253,7 +257,7 @@ tracts20 <-
   mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop,0),
          pctBachelors = ifelse(TotalPop > 0, ((FemaleBachelors + MaleBachelors) / TotalPop),0),
          pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
-         year = "2020") %>%
+         year = "2019") %>%
   dplyr::select(-Whites, -FemaleBachelors, -MaleBachelors, -TotalPoverty) 
 ```
 
@@ -273,7 +277,7 @@ allTracts <- rbind(tracts16,tracts20)
 ```{r}
 SD_Stops <- st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
   filter(stop_agncy == "MTS")%>%
-  dplyr::select(stop_uid, stop_name, geometry)
+  dplyr::select(stop_uid, stop_name, geometry, lat, lng)
 
 SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit.csv") %>%
   filter(route_id == 510| route_id == 520| route_id == 530) %>%
@@ -284,37 +288,106 @@ SD_RoutesTable <- read.csv("https://bennkeel.github.io/SanDiego_TOD/GTFS_Transit
                           TRUE ~ "other"))
 
 SD_trolleyDubs <- left_join(SD_RoutesTable, SD_Stops, by= c("stop_uid"))%>%
-  dplyr::select(line, stop_name, geometry)
+  dplyr::select(-stop_uid)
 
-SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]
+SD_trolley <- SD_trolleyDubs[!duplicated(SD_trolleyDubs$stop_name),]%>%
+  st_as_sf(coords = c("lng", "lat"),
+           crs = "EPSG:4326")%>%
+  st_transform(SD_crs)
 
 glimpse(SD_trolley)
+#st_crs(SD_trolley)
 
-# trolleyStops <-
-#   rbind(
-#     st_read("https://seshat.datasd.org/sde/transit_stops_gtfs/transit_stops_datasd.geojson") %>%
-#       mutate(Line = "El") %>%
-#       dplyr::select(Station, Line),
-#     st_read("https://opendata.arcgis.com/datasets/2e9037fd5bef406488ffe5bb67d21312_0.geojson") %>%
-#       mutate(Line ="Broad_St") %>%
-#       dplyr::select(Station, Line)) %>%
-#   st_transform(st_crs(tracts16))
+
 ```
 
 Let's visualize it
 
 ```{r}
+#glimpse(SD_trolley)
+#plot(SD_trolley)
+
 ggplot() + 
   geom_sf(data=st_union(tracts16)) +
   geom_sf(data=SD_trolley, 
-          aes(color = route_id), 
+          aes(colour = line), 
           show.legend = "point", size= 2) +
-  scale_colour_manual(values = c("orange","blue")) +
+  scale_colour_manual(values = c("blue","green", "orange"))+
   labs(title="Trolley Stops", 
        subtitle="San Diego, CA", 
        caption="Figure 2.5") +
   mapTheme()
 ```
+### Finding the Best Boundary For Analysis
+
+Evidently San Diego is a large county with many regions, and the trolley system is just in a single urban corner. By evaluating a large buffer and seeing which parts intersect, we can reduce the influence of unknown variables from the analysis, like access to North County and Los Angeles to the North.
+
+<insert photo here>
+
+```{r}
+# 9 mile buffer around the trolley stops to limit evaluation
+trolleyMaxBuffer <- 
+    st_union(st_buffer(SD_trolley, 14484)) %>%
+    st_sf()%>%
+    mutate(Legend = "Max Buffer")
+
+#Intersect the tracts with the max buffer based on the tract's centroids. Must be separate or else left_join will duplicate.
+tracts16_LimitSD <-
+  st_centroid(tracts16)[trolleyMaxBuffer,] %>%
+  st_drop_geometry() %>%
+  left_join(., dplyr::select(tracts16, GEOID), by = "GEOID") %>%
+  st_sf()
+
+tracts20_LimitSD <-
+  st_centroid(tracts20)[trolleyMaxBuffer,] %>%
+  st_drop_geometry() %>%
+  left_join(., dplyr::select(tracts20, GEOID), by = "GEOID") %>%
+  st_sf()
+
+allTracts_LimitSD <- rbind(tracts16_LimitSD, tracts20_LimitSD)
+
+
+#Plot the intersection to see the shape
+ggplot() +
+  geom_sf(data=allTracts_LimitSD, aes(fill = q5(TotalPop))) +
+  geom_sf(data=SD_trolley, show.legend = "point") +
+  facet_wrap(~year) + 
+  scale_fill_manual(values = palette5,
+    labels = qBr(totalPop16, "estimate"),
+    name = "Popluation\n(Quintile Breaks)") +
+  mapTheme()
+
+
+
+```
+
+### Plotting the Limited Census Tract Area
+
+```{r}
+
+ggplot() + 
+  geom_sf(data=st_union(selectMaxCentroids)) +
+  geom_sf(data=SD_trolley, 
+          aes(colour = line), 
+          show.legend = "point", size= 2) +
+  scale_colour_manual(values = c("blue","green", "orange"))+
+  labs(title="Trolley Stops", 
+       subtitle="San Diego, CA", 
+       caption="Figure 2.5") +
+  mapTheme()
+
+tractsBoundary <- st_union(selectMaxCentroids)
+
+#Writing a geojson to include in the map diagram:
+# tractsBoundary_sf <- st_as_sf(tractsBoundary, coords = c("x", "y"), crs = SD_crs, agr = "constant") %>%
+#   st_transform("EPSG:4326")
+# 
+# st_write(tractsBoundary_sf, "SDAnalysisBoundary3.geojson")
+
+
+
+```
+
 
 ### Relating SEPTA Stops and Tracts
 
@@ -327,13 +400,12 @@ Let's do this in pieces to understand this hefty code chunk
 We put them in the same data frame... why?
 
 ```{r}
-
-septaBuffers <- 
+trolleyBuffers <- 
   rbind(
-    st_buffer(septaStops, 2640) %>%
+    st_buffer(SD_trolley, 805) %>%
       mutate(Legend = "Buffer") %>%
       dplyr::select(Legend),
-    st_union(st_buffer(septaStops, 2640)) %>%
+    st_union(st_buffer(SD_trolley, 805)) %>%
       st_sf() %>%
       mutate(Legend = "Unioned Buffer"))
 ```
@@ -346,12 +418,14 @@ geographic area. We accomplish this by using the `facet_wrap()`
 
 ```{r}
 ggplot() +
-  geom_sf(data=septaBuffers) +
-  geom_sf(data=septaStops, show.legend = "point") +
+  geom_sf(data=trolleyBuffers) +
+  geom_sf(data=SD_trolley, show.legend = "point") +
   facet_wrap(~Legend) + 
   labs(caption = "Figure 2.6") +
   mapTheme()
 ```
+
+
 
 ### Using the `sf` Package for Spatial operations
 
@@ -362,7 +436,7 @@ Create an sf object with ONLY the unioned buffer from the `septaBuffers`
 spatial data frame.
 
 ```{r}
-buffer <- filter(septaBuffers, Legend=="Unioned Buffer")
+buffer <- filter(trolleyBuffers, Legend=="Unioned Buffer")
 ```
 
 ### Spatial Intersection of tracts and buffers
@@ -397,7 +471,7 @@ assumed..." don't worry about it.
 
 ```{r}
 clip <- 
-  st_intersection(buffer, tracts16) %>%
+  st_intersection(buffer, tracts16_LimitSD) %>%
   dplyr::select(TotalPop) %>%
   mutate(Selection_Type = "Clip")
 ```
@@ -437,17 +511,17 @@ outcome.
 
 # approach #1: sub-setting a spatial object with a spatial object using the '[' brackets.
 selection1 <- 
-  tracts16[buffer,] %>%
+  tracts16_LimitSD[buffer,] %>%
   dplyr::select(TotalPop) %>%
   mutate(Selection_Type = "Spatial Selection")
 
 # approach #2: using `st_intersects` as a verbose way to do approach #1
-selection2 <- tracts16[st_intersects(tracts16, buffer) %>% lengths > 0, ] %>%
+selection2 <- tracts16_LimitSD[st_intersects(tracts16_LimitSD, buffer) %>% lengths > 0, ] %>%
   dplyr::select(TotalPop) %>%
   mutate(Selection_Type = "Spatial Selection")
 
 # approach #3: use `st_join` to do a spatial join and remove the non-intersecting polygons
-selection3 <- tracts16 %>% 
+selection3 <- tracts16_LimitSD %>% 
   st_join(buffer, join = st_intersects) %>% 
   filter(!is.na(Legend)) %>% 
   dplyr::select(TotalPop) %>%
@@ -481,9 +555,9 @@ don't worry about it.
 
 ```{r}
 selectCentroids <-
-  st_centroid(tracts16)[buffer,] %>%
+  st_centroid(tracts16_LimitSD)[buffer,] %>%
   st_drop_geometry() %>%
-  left_join(., dplyr::select(tracts16, GEOID), by = "GEOID") %>%
+  left_join(., dplyr::select(tracts16_LimitSD, GEOID), by = "GEOID") %>%
   st_sf() %>%
   dplyr::select(TotalPop) %>%
   mutate(Selection_Type = "Select by Centroids")
@@ -496,10 +570,18 @@ intersections <- rbind(clip, selection1, selectCentroids)
 
 ggplot() +
   geom_sf(data=intersections, aes(fill = TotalPop)) +
-  geom_sf(data=septaStops, show.legend = "point") +
+  geom_sf(data=SD_trolley, show.legend = "point") +
   scale_fill_viridis_c() +
   facet_wrap(~Selection_Type) + 
   mapTheme()
+
+
+# glimpse(SD_trolley)
+# mydata <- SD_trolley %>% 
+#   filter(stop_name == "Balboa Avenue Station")%>%
+#   st_transform("EPSG: 4326")
+# 
+# mydata
 ```
 
 ## Bonus Exercise - Can you create a small multiple map of the three types of operations? (NOT GRADED)
@@ -515,19 +597,35 @@ then examine it. What represents the joins/doesn't join dichotomy? Note
 that this contains a correct 2016-2020 inflation calculation
 
 ```{r}
-allTracts.group <- 
+# allTracts.group <- 
+#   rbind(
+#     st_centroid(allTracts)[buffer,] %>%
+#       st_drop_geometry() %>%
+#       left_join(allTracts) %>%
+#       st_sf() %>%
+#       mutate(TOD = "TOD"),
+#     st_centroid(allTracts)[buffer, op = st_disjoint] %>%
+#       st_drop_geometry() %>%
+#       left_join(allTracts) %>%
+#       st_sf() %>%
+#       mutate(TOD = "Non-TOD")) %>%
+#   mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.14, MedRent)) 
+
+tracts_LimitSD.group <- 
   rbind(
-    st_centroid(allTracts)[buffer,] %>%
+    st_centroid(allTracts_LimitSD)[buffer,] %>%
       st_drop_geometry() %>%
-      left_join(allTracts) %>%
+      left_join(allTracts_LimitSD) %>%
       st_sf() %>%
       mutate(TOD = "TOD"),
-    st_centroid(allTracts)[buffer, op = st_disjoint] %>%
+    st_centroid(allTracts_LimitSD)[buffer, op = st_disjoint] %>%
       st_drop_geometry() %>%
-      left_join(allTracts) %>%
+      left_join(allTracts_LimitSD) %>%
       st_sf() %>%
       mutate(TOD = "Non-TOD")) %>%
   mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.14, MedRent)) 
+
+glimpse(tracts_LimitSD.group)
 
 ```
 
@@ -537,8 +635,8 @@ contained in "map_exercise.R"
 ### TOD Indicator Tables
 
 ```{r}
-allTracts.Summary <- 
-  st_drop_geometry(allTracts.group) %>%
+tracts_LimitSD.Summary <- 
+  st_drop_geometry(tracts_LimitSD.group) %>%
   group_by(year, TOD) %>%
   summarize(Rent = mean(MedRent, na.rm = T),
             Population = mean(TotalPop, na.rm = T),
@@ -546,7 +644,7 @@ allTracts.Summary <-
             Percent_Bach = mean(pctBachelors, na.rm = T),
             Percent_Poverty = mean(pctPoverty, na.rm = T))
 
-kable(allTracts.Summary) %>%
+kable(tracts_LimitSD.Summary) %>%
   kable_styling() %>%
   footnote(general_title = "\n",
            general = "Table 2.2")
@@ -559,7 +657,7 @@ too)
 Notice how we pipe the kable() command here
 
 ```{r}
-allTracts.Summary %>%
+tracts_LimitSD.Summary %>%
   unite(year.TOD, year, TOD, sep = ": ", remove = T) %>%
   gather(Variable, Value, -year.TOD) %>%
   mutate(Value = round(Value, 2)) %>%
@@ -577,7 +675,7 @@ one up please) To go from wide to long Why do we do this?? Notice we can
 "pipe" a ggplot call right into this operation!
 
 ```{r}
-allTracts.Summary %>%
+tracts_LimitSD.Summary %>%
   gather(Variable, Value, -year, -TOD) %>%
   ggplot(aes(year, Value, fill = TOD)) +
   geom_bar(stat = "identity", position = "dodge") +
@@ -627,26 +725,90 @@ allTracts.threeMarkets <-
 ### Example of using `multipleRingBuffer()` function
 
 ```{r}
-allTracts <- rbind(tracts20,tracts16)
-septa_MRB <- multipleRingBuffer(st_union(septaStops), 47520, 2640)
+#allTracts <- rbind(tracts20_LimitSD,tracts16_LimitSD)
+trolley_MRB <- multipleRingBuffer(st_union(SD_trolley), 14484, 805)
 
-allTracts.rings <-
-  st_join(st_centroid(dplyr::select(allTracts, GEOID, year)),
-          septa_MRB) %>%
+
+allTracts_LimitSD.rings <-
+  st_join(st_centroid(dplyr::select(allTracts_LimitSD, GEOID, year)),
+          trolley_MRB) %>%
   st_drop_geometry() %>%
-  left_join(dplyr::select(allTracts, GEOID, MedRent, year), 
+  left_join(dplyr::select(allTracts_LimitSD, GEOID, MedRent, year), 
             by=c("GEOID"="GEOID", "year"="year")) %>%
   st_sf() %>%
-  mutate(distance = distance / 5280) #convert to miles
+  mutate(distance = distance / 1610) #convert to miles
 
-
+glimpse(SD_trolley)
 
   ggplot() +
-    geom_sf(data=septa_MRB) +
-    geom_sf(data=septaStops, size=1) +
-    geom_sf(data=st_union(tracts20), fill=NA, size=1.2) +
+    geom_sf(data=trolley_MRB) +
+    geom_sf(data=SD_trolley, size=1) +
+    geom_sf(data=st_union(tracts20_LimitSD), fill=NA, size=1.2) +
     labs(title="Half mile buffers") +
     mapTheme()
 
 ```
+### Line Graph
+```{r}
+glimpse(allTracts.ring.summary)
+allTracts.ring.summary <- allTracts_LimitSD.rings %>%
+  dplyr::select(year, distance, MedRent)%>%
+  st_drop_geometry()%>%
+  group_by(year,distance)%>%
+  summarize(Rent=median(MedRent, na.rm=T))
 
+ggplot(data=allTracts.ring.summary, aes(x=distance, y=Rent, group = year),)+
+  geom_line(aes(color=year), size=1.5)+
+  geom_point(aes(color=year), size = 3)
+  
+
+
+
+st_join(st_centroid(dplyr::select(allTracts_LimitSD, GEOID, year)),
+          trolley_MRB) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(allTracts_LimitSD, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distance = distance / 805)
+```
+
+
+### Plotting a graduated symbol map
+
+```{r}
+#allTracts <- rbind(tracts20_LimitSD,tracts16_LimitSD)
+trolleyPB <- filter(trolleyBuffers, Legend == "Buffer")%>%
+  tibble::rowid_to_column("ID")
+allTracts_LimitSD_C <- dplyr::select(allTracts_LimitSD, GEOID, TotalPop, MedRent, year, geometry)
+glimpse(trolleyPB)  
+  
+stationData <- 
+  st_join(trolleyPB, allTracts_LimitSD_C, join = st_intersects)%>%  #get spacial join/filter of Trolley Buffers and all_tracts_limitSD
+  dplyr::select(ID, Legend, GEOID, TotalPop, MedRent, geometry)%>%
+  dplyr::group_by(ID)%>%
+  summarize(pop = mean(TotalPop), rent=mean(MedRent, na.rm = TRUE))%>%
+  st_centroid(stationData)%>%
+  st_as_sf()
+
+ggplot() +
+  geom_sf(data = allTracts_LimitSD, fill = "grey40") +
+  geom_sf(data = stationData,
+          pch = 21,
+          aes(size = (pop)),
+          fill = alpha("red", 0.7),
+          col = "grey20") +
+  labs(size = "Population") +
+  scale_size(range = c(1, 5))
+
+aes(fill = q5(estimate))
+
+tmap_mode("view")%>%
+  tm_shape(SD_trolley)+
+  tm_bubbles(col = "red",
+            size = 1,
+             border.col = "black",
+           border.lwd = 1)
+
+
+```
